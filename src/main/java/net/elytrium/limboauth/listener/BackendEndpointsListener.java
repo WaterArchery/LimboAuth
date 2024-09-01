@@ -33,10 +33,7 @@ import java.util.function.Function;
 import net.elytrium.limboauth.LimboAuth;
 import net.elytrium.limboauth.Settings;
 import net.elytrium.limboauth.backend.Endpoint;
-import net.elytrium.limboauth.backend.type.LongDatabaseEndpoint;
-import net.elytrium.limboauth.backend.type.StringDatabaseEndpoint;
-import net.elytrium.limboauth.backend.type.StringEndpoint;
-import net.elytrium.limboauth.backend.type.UnknownEndpoint;
+import net.elytrium.limboauth.backend.type.*;
 import net.elytrium.limboauth.model.RegisteredPlayer;
 
 public class BackendEndpointsListener {
@@ -50,7 +47,7 @@ public class BackendEndpointsListener {
           username -> lauth.isPremiumInternal(username).getState().name())),
       new SimpleEntry<>("hash", plugin -> new StringDatabaseEndpoint(plugin, "hash", RegisteredPlayer::getHash)),
       new SimpleEntry<>("totp_token", plugin -> new StringDatabaseEndpoint(plugin, "totp_token", RegisteredPlayer::getTotpToken)),
-      new SimpleEntry<>("reg_date", plugin -> new LongDatabaseEndpoint(plugin, "reg_date", RegisteredPlayer::getRegDate)),
+      new SimpleEntry<>("reg_date", plugin -> new DateTimeDatabaseEndpoint(plugin, "reg_date", RegisteredPlayer::getRegDate)),
       new SimpleEntry<>("uuid", plugin -> new StringDatabaseEndpoint(plugin, "uuid", RegisteredPlayer::getUuid)),
       new SimpleEntry<>("premium_uuid", plugin -> new StringDatabaseEndpoint(plugin, "premium_uuid", RegisteredPlayer::getPremiumUuid)),
       new SimpleEntry<>("ip", plugin -> new StringDatabaseEndpoint(plugin, "ip", RegisteredPlayer::getIP)),

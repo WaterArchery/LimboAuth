@@ -21,6 +21,7 @@ import at.favre.lib.crypto.bcrypt.BCrypt;
 import com.google.common.primitives.Longs;
 import com.j256.ormlite.dao.Dao;
 import com.velocitypowered.api.proxy.Player;
+import com.velocitypowered.api.scheduler.Scheduler;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
 import dev.samstevens.totp.code.CodeVerifier;
 import dev.samstevens.totp.code.DefaultCodeGenerator;
@@ -146,7 +147,8 @@ public class AuthSessionHandler implements LimboSessionHandler {
           int sizeOfValidRegistrations = alreadyRegistered.size();
           if (Settings.IMP.MAIN.IP_LIMIT_VALID_TIME > 0) {
             for (RegisteredPlayer registeredPlayer : alreadyRegistered.stream()
-                .filter(registeredPlayer -> registeredPlayer.getRegDate() < System.currentTimeMillis() - Settings.IMP.MAIN.IP_LIMIT_VALID_TIME)
+                .filter(registeredPlayer -> registeredPlayer.getRegDate().toInstant().toEpochMilli() <
+                        System.currentTimeMillis() - Settings.IMP.MAIN.IP_LIMIT_VALID_TIME)
                 .collect(Collectors.toList())) {
               registeredPlayer.setIP("");
               this.playerDao.update(registeredPlayer);
@@ -201,78 +203,82 @@ public class AuthSessionHandler implements LimboSessionHandler {
 
   @Override
   public void onChat(String message) {
-    if (this.loginOnlyByMod) {
-      return;
-    }
+    Scheduler scheduler = plugin.getServer().getScheduler();
 
-    if (!LimboAuth.RATELIMITER.attempt(this.proxyPlayer.getRemoteAddress().getAddress())) {
-      this.proxyPlayer.sendMessage(AuthSessionHandler.ratelimited);
-      return;
-    }
-
-    String[] args = message.split(" ");
-    if (args.length != 0 && this.checkArgsLength(args.length)) {
-      Command command = Command.parse(args[0]);
-      if (command == Command.REGISTER && !this.totpState && this.playerInfo == null) {
-        String password = args[1];
-        if (this.checkPasswordsRepeat(args) && this.checkPasswordLength(password)
-                && this.checkPasswordStrength(password) && this.checkUnsafePassSet(this.proxyPlayer.getUsername(), password)) {
-          this.saveTempPassword(password);
-          RegisteredPlayer registeredPlayer = new RegisteredPlayer(this.proxyPlayer).setPassword(password);
-
-          try {
-            this.playerDao.create(registeredPlayer);
-            this.playerInfo = registeredPlayer;
-          } catch (SQLException e) {
-            this.proxyPlayer.disconnect(databaseErrorKick);
-            throw new SQLRuntimeException(e);
-          }
-
-          this.proxyPlayer.sendMessage(registerSuccessful);
-          if (registerSuccessfulTitle != null) {
-            this.proxyPlayer.showTitle(registerSuccessfulTitle);
-          }
-
-          this.plugin.getServer().getEventManager()
-              .fire(new PostRegisterEvent(this::finishAuth, this.player, this.playerInfo, this.tempPassword))
-              .thenAcceptAsync(this::finishAuth);
-        }
-
-        // {@code return} placed here (not above), because
-        // AuthSessionHandler#checkPasswordsRepeat, AuthSessionHandler#checkPasswordLength, and AuthSessionHandler#checkPasswordStrength methods are
-        // invoking Player#sendMessage that sends its own message in case if the return value is false.
-        // If we don't place {@code return} here, an another message (AuthSessionHandler#sendMessage) will be sent.
+    scheduler.buildTask(plugin, () -> {
+      if (this.loginOnlyByMod) {
         return;
-      } else if (command == Command.LOGIN && !this.totpState && this.playerInfo != null) {
-        String password = args[1];
-        this.saveTempPassword(password);
+      }
 
-        if (password.length() > 0 && checkPassword(password, this.playerInfo, this.playerDao)) {
-          if (this.playerInfo.getTotpToken().isEmpty()) {
-            this.finishLogin();
-          } else {
-            this.totpState = true;
-            this.sendMessage(true);
-          }
-        } else if (--this.attempts != 0) {
-          this.proxyPlayer.sendMessage(loginWrongPassword[this.attempts - 1]);
-          this.checkBruteforceAttempts();
-        } else {
-          this.proxyPlayer.disconnect(loginWrongPasswordKick);
-        }
-
+      if (!LimboAuth.RATELIMITER.attempt(this.proxyPlayer.getRemoteAddress().getAddress())) {
+        this.proxyPlayer.sendMessage(AuthSessionHandler.ratelimited);
         return;
-      } else if (command == Command.TOTP && this.totpState && this.playerInfo != null) {
-        if (TOTP_CODE_VERIFIER.isValidCode(this.playerInfo.getTotpToken(), args[1])) {
-          this.finishLogin();
+      }
+
+      String[] args = message.split(" ");
+      if (args.length != 0 && this.checkArgsLength(args.length)) {
+        Command command = Command.parse(args[0]);
+        if (command == Command.REGISTER && !this.totpState && this.playerInfo == null) {
+          String password = args[1];
+          if (this.checkPasswordsRepeat(args) && this.checkPasswordLength(password)
+                  && this.checkPasswordStrength(password) && this.checkUnsafePassSet(this.proxyPlayer.getUsername(), password)) {
+            this.saveTempPassword(password);
+            RegisteredPlayer registeredPlayer = new RegisteredPlayer(this.proxyPlayer).setPassword(password);
+
+            try {
+              this.playerDao.create(registeredPlayer);
+              this.playerInfo = registeredPlayer;
+            } catch (SQLException e) {
+              this.proxyPlayer.disconnect(databaseErrorKick);
+              throw new SQLRuntimeException(e);
+            }
+
+            this.proxyPlayer.sendMessage(registerSuccessful);
+            if (registerSuccessfulTitle != null) {
+              this.proxyPlayer.showTitle(registerSuccessfulTitle);
+            }
+
+            this.plugin.getServer().getEventManager()
+                    .fire(new PostRegisterEvent(this::finishAuth, this.player, this.playerInfo, this.tempPassword))
+                    .thenAcceptAsync(this::finishAuth);
+          }
+
+          // {@code return} placed here (not above), because
+          // AuthSessionHandler#checkPasswordsRepeat, AuthSessionHandler#checkPasswordLength, and AuthSessionHandler#checkPasswordStrength methods are
+          // invoking Player#sendMessage that sends its own message in case if the return value is false.
+          // If we don't place {@code return} here, an another message (AuthSessionHandler#sendMessage) will be sent.
           return;
-        } else {
-          this.checkBruteforceAttempts();
+        } else if (command == Command.LOGIN && !this.totpState && this.playerInfo != null) {
+          String password = args[1];
+          this.saveTempPassword(password);
+
+          if (password.length() > 0 && checkPassword(password, this.playerInfo, this.playerDao)) {
+            if (this.playerInfo.getTotpToken().isEmpty()) {
+              this.finishLogin();
+            } else {
+              this.totpState = true;
+              this.sendMessage(true);
+            }
+          } else if (--this.attempts != 0) {
+            this.proxyPlayer.sendMessage(loginWrongPassword[this.attempts - 1]);
+            this.checkBruteforceAttempts();
+          } else {
+            this.proxyPlayer.disconnect(loginWrongPasswordKick);
+          }
+
+          return;
+        } else if (command == Command.TOTP && this.totpState && this.playerInfo != null) {
+          if (TOTP_CODE_VERIFIER.isValidCode(this.playerInfo.getTotpToken(), args[1])) {
+            this.finishLogin();
+            return;
+          } else {
+            this.checkBruteforceAttempts();
+          }
         }
       }
-    }
 
-    this.sendMessage(false);
+      this.sendMessage(false);
+    }).schedule();
   }
 
   @Override
